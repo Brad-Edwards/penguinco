@@ -5,11 +5,11 @@ from typing import List, Tuple
 import stripe
 from dotenv import load_dotenv
 from flasgger import Swagger
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static/build")
 swagger = Swagger(app)
 
 load_dotenv()
@@ -37,7 +37,7 @@ def missing_params(required_params, data) -> Tuple[bool, List[str]]:
     return False, []
 
 
-@app.route("/attach_payment_method", methods=["POST"])
+@app.route("/api/attach_payment_method", methods=["POST"])
 def attach_payment_method():
     """
     Attach a payment method to a customer.
@@ -107,7 +107,7 @@ def attach_payment_method():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/authorize_charge", methods=["POST"])
+@app.route("/api/authorize_charge", methods=["POST"])
 def authorize_charge():
     """
     Authorize a charge for a customer.
@@ -164,7 +164,7 @@ def authorize_charge():
     return response
 
 
-@app.route("/capture_charge", methods=["POST"])
+@app.route("/api/capture_charge", methods=["POST"])
 def capture_charge():
     """
     Capture a charge for a customer.
@@ -227,7 +227,7 @@ def capture_charge():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/complete_charge", methods=["POST"])
+@app.route("/api/complete_charge", methods=["POST"])
 def complete_charge():
     """
     Complete a charge for a customer.
@@ -266,7 +266,7 @@ def complete_charge():
     return response
 
 
-@app.route("/create_customer", methods=["POST"])
+@app.route("/api/create_customer", methods=["POST"])
 def create_customer():
     """
     Create a customer.
@@ -317,7 +317,7 @@ def create_customer():
         return jsonify({"error": str(e)}), 400
 
 
-@app.route("/create_payment_intent", methods=["POST"])
+@app.route("/api/create_payment_intent", methods=["POST"])
 def create_payment_intent():
     """
     Create a payment intent for a customer.
@@ -422,7 +422,7 @@ def create_payment_intent():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/create_price", methods=["POST"])
+@app.route("/api/create_price", methods=["POST"])
 def create_price():
     """
     Create a price for a product.
@@ -480,7 +480,7 @@ def create_price():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/create_product", methods=["POST"])
+@app.route("/api/create_product", methods=["POST"])
 def create_product():
     """
     Create a product.
@@ -554,7 +554,7 @@ def create_product():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/create_subscription", methods=["POST"])
+@app.route("/api/create_subscription", methods=["POST"])
 def create_subscription():
     """
     Create a subscription for a customer.
@@ -626,7 +626,7 @@ def create_subscription():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/refund_payment", methods=["POST"])
+@app.route("/api/refund_payment", methods=["POST"])
 def refund_payment():
     """
     Refund a payment for a customer.
@@ -677,7 +677,7 @@ def refund_payment():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/update_billing_anchor", methods=["POST"])
+@app.route("/api/update_billing_anchor", methods=["POST"])
 def update_billing_anchor():
     """
     Update the billing anchor date for a subscription.
@@ -761,6 +761,15 @@ def update_billing_anchor():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve(path):
+    if path and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, "index.html")
 
 
 if __name__ == "__main__":
