@@ -16,6 +16,8 @@ load_dotenv()
 stripe.api_key = os.getenv("STRIPE_API_KEY")
 stripe_webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
+MISSING_PARAMETERS = "Missing required parameters"
+
 
 def missing_params(required_params, data) -> Tuple[bool, List[str]]:
     """
@@ -79,9 +81,7 @@ def attach_payment_method():
         missing, params = missing_params(["customer_id", "payment_identifier"], data)
         if missing:
             return (
-                jsonify(
-                    {"error": "Missing required parameters", "missing_params": params}
-                ),
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
                 400,
             )
 
@@ -204,9 +204,7 @@ def capture_charge():
         missing, params = missing_params(["payment_intent_id"], data)
         if missing:
             return (
-                jsonify(
-                    {"error": "Missing required parameters", "missing_params": params}
-                ),
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
                 400,
             )
 
@@ -307,9 +305,7 @@ def create_customer():
         missing, params = missing_params(["name", "email"], data)
         if missing:
             return (
-                jsonify(
-                    {"error": "Missing required parameters", "missing_params": params}
-                ),
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
                 400,
             )
 
@@ -394,9 +390,7 @@ def create_payment_intent():
         )
         if missing:
             return (
-                jsonify(
-                    {"error": "Missing required parameters", "missing_params": params}
-                ),
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
                 400,
             )
 
@@ -472,9 +466,7 @@ def create_price():
         missing, params = missing_params(["product_id", "unit_amount"], data)
         if missing:
             return (
-                jsonify(
-                    {"error": "Missing required parameters", "missing_params": params}
-                ),
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
                 400,
             )
 
@@ -537,9 +529,7 @@ def create_product():
         missing, params = missing_params(["name"], data)
         if missing:
             return (
-                jsonify(
-                    {"error": "Missing required parameters", "missing_params": params}
-                ),
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
                 400,
             )
 
@@ -609,9 +599,7 @@ def create_subscription():
         missing, params = missing_params(["customer_id", "price_id"], data)
         if missing:
             return (
-                jsonify(
-                    {"error": "Missing required parameters", "missing_params": params}
-                ),
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
                 400,
             )
 
@@ -675,9 +663,7 @@ def refund_payment():
         missing, params = missing_params(["payment_intent_id"], data)
         if missing:
             return (
-                jsonify(
-                    {"error": "Missing required parameters", "missing_params": params}
-                ),
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
                 400,
             )
 
@@ -750,9 +736,7 @@ def update_billing_anchor():
         )
         if missing:
             return (
-                jsonify(
-                    {"error": "Missing required parameters", "missing_params": params}
-                ),
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
                 400,
             )
 

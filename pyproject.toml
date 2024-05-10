@@ -4,4 +4,3 @@ exclude = '''
     .venv
 )/
 '''
-skip_gitignore = true
