@@ -6,31 +6,22 @@ import stripe
 from dotenv import load_dotenv
 from flasgger import Swagger
 from flask import Flask, jsonify, request, send_from_directory
+from flask_cors import CORS
 
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder="static/build")
+CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
 swagger = Swagger(app)
 
 load_dotenv()
-stripe.api_key = os.getenv("STRIPE_API_KEY")
+stripe.api_key = os.getenv("FLASK_APP_STRIPE_API_KEY")
 stripe_webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
 MISSING_PARAMETERS = "Missing required parameters"
 
 
 def missing_params(required_params, data) -> Tuple[bool, List[str]]:
-    """
-    Check if any required parameters are missing from the data.
-
-    Args:
-        required_params (list): The required parameters.
-        data (dict): The data to check.
-
-    Returns:
-        Tuple[bool, List[str]]: A tuple containing a boolean indicating if any
-        required parameters are missing and a list of missing parameters.
-    """
     missing_params = [param for param in required_params if not data.get(param)]
     if missing_params:
         return True, missing_params
@@ -40,37 +31,57 @@ def missing_params(required_params, data) -> Tuple[bool, List[str]]:
 @app.route("/api/attach_payment_method", methods=["POST"])
 def attach_payment_method():
     """
-    Attach a payment method to a customer.
+    Attach a payment method to a customer
     ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
     parameters:
-      - name: body
-        in: body
+      - in: body
+        name: body
+        description: Payment method details
         required: true
         schema:
-          id: AttachPaymentMethod
+          type: object
           required:
             - customer_id
             - payment_identifier
-            - set_as_default
           properties:
             customer_id:
               type: string
-              description: The ID of the customer to attach the payment method to.
+              description: Customer ID to attach the payment method to
             payment_identifier:
               type: string
-              description: The ID of the payment method to attach.
+              description: Payment method identifier
             set_as_default:
               type: boolean
-              description: Whether to set the payment method as the default for the customer.
+              description: Set the payment method as the default for the customer
     responses:
       200:
-        description: Payment method attached successfully.
+        description: Payment method attached successfully
         schema:
-          id: PaymentMethodResponse
+          type: object
           properties:
             payment_method_id:
               type: string
-              description: The ID of the payment method.
+              description: ID of the attached payment method
+      400:
+        description: Error with payment method attachment (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
     """
     try:
         data = request.get_json()
@@ -110,14 +121,19 @@ def attach_payment_method():
 @app.route("/api/authorize_charge", methods=["POST"])
 def authorize_charge():
     """
-    Authorize a charge for a customer.
+    Authorize a charge on a customer's payment method.
     ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
     parameters:
-      - name: body
-        in: body
+      - in: body
+        name: body
+        description: Payment intent details
         required: true
         schema:
-          id: AuthorizeCharge
+          type: object
           required:
             - amount
             - customer_id
@@ -125,77 +141,153 @@ def authorize_charge():
           properties:
             amount:
               type: integer
-              description: The amount to charge the customer in cents.
+              description: Amount to be charged in cents
             currency:
               type: string
-              default: USD
-              description: The currency to charge the customer in.
+              description: Currency in which the amount is charged
+              default: "usd"
             customer_id:
               type: string
-              description: The ID of the customer to charge.
+              description: Customer ID to charge
             payment_method_id:
               type: string
-              description: The ID of the payment method to charge.
+              description: Payment method ID to be charged
             payment_method_types:
               type: array
               items:
                 type: string
-              description: The types of payment methods to charge.
+              description: Types of payment methods
+              default: ["card"]
             description:
               type: string
-              description: The description of the charge.
+              description: Description of the transaction
             metadata:
               type: object
-              description: The metadata to attach to the charge.
+              description: Additional metadata for the transaction
+            capture_method:
+              type: string
+              description: Capture method for the charge, e.g., 'automatic' or 'manual'
+              default: "manual"
     responses:
       200:
-        description: Charge authorized successfully.
+        description: Payment intent created successfully
         schema:
-          id: PaymentIntentResponse
+          type: object
           properties:
             payment_intent_id:
               type: string
-              description: The ID of the payment intent.
+              description: ID of the created payment intent
+      400:
+        description: Error with payment intent creation (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
     """
-    data = request.get_json()
-    data["capture_method"] = "manual"
+    try:
+        data = request.get_json()
+        amount = data["amount"]
+        currency = data.get("currency", "usd")
+        customer_id = data["customer_id"]
+        payment_method_id = data["payment_method_id"]
+        payment_method_types = data.get("payment_method_types", ["card"])
+        description = data.get("description", "")
+        metadata = data.get("metadata", {})
+        capture_method = data.get("capture_method", "manual")
 
-    response = create_payment_intent()
-    return response
+        missing, params = missing_params(
+            ["amount", "customer_id", "payment_method_id"], data
+        )
+        if missing:
+            return (
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
+                400,
+            )
+
+        payment_intent = stripe.PaymentIntent.create(
+            amount=amount,
+            currency=currency,
+            customer=customer_id,
+            payment_method_types=payment_method_types,
+            payment_method=payment_method_id,
+            description=description,
+            metadata=metadata,
+            capture_method=capture_method,
+            confirm=True,
+        )
+
+        return (
+            jsonify(
+                {
+                    "payment_intent_id": payment_intent.id,
+                    "client_secret": payment_intent.client_secret,
+                }
+            ),
+            200,
+        )
+    except stripe.error.StripeError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/capture_charge", methods=["POST"])
 def capture_charge():
     """
-    Capture a charge for a customer.
+    Capture a charge on a customer's payment method.
     ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
     parameters:
-      - name: body
-        in: body
+      - in: body
+        name: body
+        description: Payment intent details
         required: true
         schema:
-          id: CaptureCharge
+          type: object
           required:
             - payment_intent_id
           properties:
             payment_intent_id:
               type: string
-              description: The ID of the payment intent to capture.
+              description: Payment intent ID to be captured
     responses:
-        200:
-            description: Charge captured successfully.
-            schema:
-            id: CaptureResponse
-            properties:
-                payment_intent_id:
-                type: string
-                description: The ID of the payment intent.
-                status:
-                type: string
-                description: The status of the payment intent.
-                amount_captured:
-                type: integer
-                description: The amount captured in cents.
+      200:
+        description: Payment intent captured successfully
+        schema:
+          type: object
+          properties:
+            payment_intent_id:
+              type: string
+              description: ID of the captured payment intent
+      400:
+        description: Error with payment intent capture (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
     """
     try:
         data = request.get_json()
@@ -230,104 +322,19 @@ def capture_charge():
 @app.route("/api/complete_charge", methods=["POST"])
 def complete_charge():
     """
-    Complete a charge for a customer.
+    Complete a charge on a customer's payment method.
     ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
     parameters:
-      - name: body
-        in: body
+      - in: body
+        name: body
+        description: Payment intent details
         required: true
         schema:
-          id: CompleteCharge
-          required:
-            - payment_intent_id
-          properties:
-            payment_intent_id:
-              type: string
-              description: The ID of the payment intent to complete.
-    responses:
-        200:
-            description: Charge completed successfully.
-            schema:
-            id: CompleteResponse
-            properties:
-                payment_intent_id:
-                type: string
-                description: The ID of the payment intent.
-                status:
-                type: string
-                description: The status of the payment intent.
-                amount_captured:
-                type: integer
-                description: The amount captured in cents.
-    """
-    data = request.get_json()
-    data["capture_method"] = "automatic"
-    response = create_payment_intent()
-    return response
-
-
-@app.route("/api/create_customer", methods=["POST"])
-def create_customer():
-    """
-    Create a customer.
-    ---
-    parameters:
-      - name: body
-        in: body
-        required: true
-        schema:
-          id: CreateCustomer
-          required:
-            - name
-            - email
-          properties:
-            name:
-              type: string
-              description: The name of the customer.
-            email:
-              type: string
-              description: The email of the customer.
-    responses:
-        200:
-            description: Customer created successfully.
-            schema:
-            id: CustomerResponse
-            properties:
-                customer_id:
-                type: string
-                description: The ID of the customer.
-    """
-    try:
-        data = request.get_json()
-        name = data.get("name")
-        email = data.get("email")
-
-        missing, params = missing_params(["name", "email"], data)
-        if missing:
-            return (
-                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
-                400,
-            )
-
-        customer = stripe.Customer.create(name=name, email=email)
-
-        return jsonify({"customer_id": customer.id}), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-
-@app.route("/api/create_payment_intent", methods=["POST"])
-def create_payment_intent():
-    """
-    Create a payment intent for a customer.
-    ---
-    parameters:
-      - name: body
-        in: body
-        required: true
-        schema:
-          id: CreatePaymentIntent
+          type: object
           required:
             - amount
             - customer_id
@@ -335,51 +342,66 @@ def create_payment_intent():
           properties:
             amount:
               type: integer
-              description: The amount to charge the customer in cents.
+              description: Amount to be charged in cents
             currency:
               type: string
-              default: USD
-              description: The currency to charge the customer in.
+              description: Currency in which the amount is charged
+              default: "usd"
             customer_id:
               type: string
-              description: The ID of the customer to charge.
+              description: Customer ID to charge
             payment_method_id:
               type: string
-              description: The ID of the payment method to charge.
+              description: Payment method ID to be charged
             payment_method_types:
               type: array
               items:
                 type: string
-              description: The types of payment methods to charge.
+              description: Types of payment methods
+              default: ["card"]
             description:
               type: string
-              description: The description of the charge.
+              description: Description of the transaction
             metadata:
               type: object
-              description: The metadata to attach to the charge.
+              description: Additional metadata for the transaction
             capture_method:
               type: string
-              default: automatic
-              description: The method to capture the charge.
+              description: Capture method for the charge, e.g., 'automatic' or 'manual'
+              default: "automatic"
     responses:
-        200:
-            description: Payment intent created successfully.
-            schema:
-            id: PaymentIntentResponse
-            properties:
-                payment_intent_id:
-                type: string
-                description: The ID of the payment intent.
-                client_secret:
-                type: string
-                description: The client secret of the payment intent.
+      200:
+        description: Payment intent captured successfully
+        schema:
+          type: object
+          properties:
+            payment_intent_id:
+              type: string
+              description: ID of the captured payment intent
+    responses:
+      400:
+        description: Error with payment intent capture (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
     """
     try:
         data = request.get_json()
         amount = data["amount"]
         currency = data.get("currency", "usd")
-        customer_id = data.get("customer_id", None)
-        payment_method_id = data.get("payment_method_id", None)
+        customer_id = data["customer_id"]
+        payment_method_id = data["payment_method_id"]
         payment_method_types = data.get("payment_method_types", ["card"])
         description = data.get("description", "")
         metadata = data.get("metadata", {})
@@ -415,6 +437,86 @@ def create_payment_intent():
             ),
             200,
         )
+    except stripe.error.StripeError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/create_subscription_session", methods=["POST"])
+def create_subscription_session():
+    """
+    Create a Stripe CheckoutSession for a subscription.
+    ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        description: Subscription session details
+        required: true
+        schema:
+          type: object
+          required:
+            - customer_id
+            - price_id
+          properties:
+            customer_id:
+              type: string
+              description: Customer ID for the subscription
+            price_id:
+              type: string
+              description: Price ID for the subscription
+            success_url:
+              type: string
+              description: URL to redirect to upon successful subscription
+            cancel_url:
+              type: string
+              description: URL to redirect to if the subscription is cancelled
+    responses:
+      200:
+        description: CheckoutSession created successfully
+        schema:
+          type: object
+          properties:
+            session_url:
+              type: string
+              description: URL to complete the checkout
+      400:
+        description: Error with session creation
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+    """
+    try:
+        data = request.get_json()
+        customer_id = data["customer_id"]
+        price_id = data["price_id"]
+        success_url = data["success_url"]
+        cancel_url = data["cancel_url"]
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            customer=customer_id,
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+        return jsonify({"session_url": session.url}), 200
 
     except stripe.error.StripeError as e:
         return jsonify({"error": str(e)}), 400
@@ -422,60 +524,264 @@ def create_payment_intent():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/create_price", methods=["POST"])
-def create_price():
+@app.route("/api/create_customer", methods=["POST"])
+def create_customer():
     """
-    Create a price for a product.
+    Create a new customer in Stripe.
     ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
     parameters:
-      - name: body
-        in: body
+      - in: body
+        name: body
+        description: Customer details
         required: true
         schema:
-          id: CreatePrice
-          required:
-            - product_id
-            - unit_amount
+          type: object
           properties:
-            product_id:
+            name:
               type: string
-              description: The ID of the product to create the price for.
-            unit_amount:
-              type: integer
-              description: The unit amount to charge the customer in cents.
-            currency:
+              description: Customer name
+            email:
               type: string
-              default: USD
-              description: The currency to charge the customer in.
+              description: Customer email
     responses:
-        200:
-            description: Price created successfully.
-            schema:
-            id: PriceResponse
-            properties:
-                price_id:
-                type: string
-                description: The ID of the price.
+      200:
+        description: Customer created successfully
+        schema:
+          type: object
+          properties:
+            customer_id:
+              type: string
+              description: ID of the created customer
+      400:
+        description: Error with customer creation (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
     """
     try:
         data = request.get_json()
-        product_id = data["product_id"]
-        unit_amount = data["unit_amount"]
-        currency = data.get("currency", "usd")
+        name = data.get("name")
+        email = data.get("email")
 
-        missing, params = missing_params(["product_id", "unit_amount"], data)
+        missing, params = missing_params(["name", "email"], data)
+        if missing:
+            logger.error(f"Missing parameters: {params}")
+            return (
+                jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
+                400,
+            )
+
+        customer = stripe.Customer.create(name=name, email=email)
+        logger.info(f"Customer created with ID: {customer.id}")
+        return jsonify({"customer_id": customer.id}), 200
+
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error: {str(e)}")
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Internal server error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/create_payment_intent", methods=["POST"])
+def create_payment_intent():
+    """
+    Create a new payment intent in Stripe.
+    ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        description: Payment intent details
+        required: true
+        schema:
+          type: object
+          required:
+            - amount
+          properties:
+            amount:
+              type: integer
+              description: Amount to be charged in cents
+            currency:
+              type: string
+              description: Currency in which the amount is charged
+              default: "usd"
+            payment_method_types:
+              type: array
+              items:
+                type: string
+              description: Types of payment methods
+              default: ["card"]
+    responses:
+      200:
+        description: Payment intent created successfully
+        schema:
+          type: object
+          properties:
+            payment_intent_id:
+              type: string
+              description: ID of the created payment intent
+      400:
+        description: Error with payment intent creation (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+    """
+    try:
+        data = request.get_json()
+        print(data)
+        amount = data["amount"]
+        currency = data.get("currency", "usd")
+        payment_method_types = data.get("payment_method_types", ["card"])
+
+        missing, params = missing_params(["amount"], data)
         if missing:
             return (
                 jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
                 400,
             )
 
-        price = stripe.Price.create(
-            product=product_id, unit_amount=unit_amount, currency=currency
+        payment_intent = stripe.PaymentIntent.create(
+            amount=amount, currency=currency, payment_method_types=payment_method_types
         )
-        return jsonify({"price_id": price.id}), 200
+        print(payment_intent.id, payment_intent.client_secret)
+        return (
+            jsonify(
+                {
+                    "payment_intent_id": payment_intent.id,
+                    "client_secret": payment_intent.client_secret,
+                }
+            ),
+            200,
+        )
+
     except stripe.error.StripeError as e:
+        print(e)
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(e)
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/create_price", methods=["POST"])
+def create_price():
+    """
+    Create a new price in Stripe, optionally with a recurring interval.
+    ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        description: Price details
+        required: true
+        schema:
+          type: object
+          required:
+            - product_id
+            - unit_amount
+          properties:
+            product_id:
+              type: string
+              description: Product ID to create the price for
+            unit_amount:
+              type: integer
+              description: Unit amount in cents
+            currency:
+              type: string
+              description: Currency in which the unit amount is charged
+              default: "usd"
+            recurring:
+              type: object
+              description: Recurring billing details (optional)
+              properties:
+                interval:
+                  type: string
+                  description: Billing interval (e.g., 'day', 'week', 'month', 'year')
+                interval_count:
+                  type: integer
+                  description: Number of intervals between bills (optional, default is 1)
+    responses:
+      200:
+        description: Price created successfully
+        schema:
+          type: object
+          properties:
+            price_id:
+              type: string
+              description: ID of the created price
+      400:
+        description: Error with price creation (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+    """
+    try:
+        data = request.get_json()
+        product_id = data["product_id"]
+        unit_amount = data["unit_amount"]
+        currency = data.get("currency", "usd")
+        recurring = data.get("recurring", None)
+
+        price_data = {
+            "product": product_id,
+            "unit_amount": unit_amount,
+            "currency": currency,
+        }
+
+        if recurring:
+            price_data["recurring"] = {
+                "interval": recurring.get("interval"),
+                "interval_count": recurring.get("interval_count", 1),
+            }
+
+        price = stripe.Price.create(**price_data)
+        return jsonify({"price_id": price.id}), 200
+
+    except stripe.error.StripeError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -483,42 +789,57 @@ def create_price():
 @app.route("/api/create_product", methods=["POST"])
 def create_product():
     """
-    Create a product.
+    Create a new product in Stripe.
     ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
     parameters:
-      - name: body
-        in: body
+      - in: body
+        name: body
+        description: Product details
         required: true
         schema:
-          id: CreateProduct
+          type: object
           required:
             - name
           properties:
             name:
               type: string
-              description: The name of the product.
+              description: Product name
             description:
               type: string
-              description: The description of the product.
+              description: Product description
             active:
               type: boolean
+              description: Whether the product is active
               default: true
-              description: Whether the product is active.
     responses:
-        200:
-            description: Product created successfully.
-            schema:
-            id: ProductResponse
-            properties:
-                product_id:
-                type: string
-                description: The ID of the product.
-                name:
-                type: string
-                description: The name of the product.
-                active:
-                type: boolean
-                description: Whether the product is active.
+      200:
+        description: Product created successfully
+        schema:
+          type: object
+          properties:
+            product_id:
+              type: string
+              description: ID of the created product
+      400:
+        description: Error with product creation (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
     """
     try:
         data = request.get_json()
@@ -557,39 +878,54 @@ def create_product():
 @app.route("/api/create_subscription", methods=["POST"])
 def create_subscription():
     """
-    Create a subscription for a customer.
+    Create a new subscription in Stripe.
     ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
     parameters:
-      - name: body
-        in: body
+      - in: body
+        name: body
+        description: Subscription details
         required: true
         schema:
-          id: CreateSubscription
+          type: object
           required:
             - customer_id
             - price_id
           properties:
             customer_id:
               type: string
-              description: The ID of the customer to create the subscription for.
+              description: Customer ID to create the subscription for
             price_id:
               type: string
-              description: The ID of the price to subscribe to.
+              description: Price ID to create the subscription for
     responses:
-        200:
-            description: Subscription created successfully.
-            schema:
-            id: SubscriptionResponse
-            properties:
-                subscription_id:
-                type: string
-                description: The ID of the subscription.
-                status:
-                type: string
-                description: The status of the subscription.
-                invoice_id:
-                type: string
-                description: The ID of the invoice.
+      200:
+        description: Subscription created successfully
+        schema:
+          type: object
+          properties:
+            subscription_id:
+              type: string
+              description: ID of the created subscription
+      400:
+        description: Error with subscription creation (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
     """
     try:
         data = request.get_json()
@@ -629,32 +965,50 @@ def create_subscription():
 @app.route("/api/refund_payment", methods=["POST"])
 def refund_payment():
     """
-    Refund a payment for a customer.
+    Refund a payment in Stripe.
     ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
     parameters:
-      - name: body
-        in: body
+      - in: body
+        name: body
+        description: Payment intent ID to refund
         required: true
         schema:
-          id: RefundPayment
+          type: object
           required:
             - payment_intent_id
           properties:
             payment_intent_id:
               type: string
-              description: The ID of the payment intent to refund.
+              description: Payment intent ID to refund
     responses:
-        200:
-            description: Payment refunded successfully.
-            schema:
-            id: RefundResponse
-            properties:
-                refund_id:
-                type: string
-                description: The ID of the refund.
-                status:
-                type: string
-                description: The status of the refund.
+      200:
+        description: Payment refunded successfully
+        schema:
+          type: object
+          properties:
+            refund_id:
+              type: string
+              description: ID of the refunded payment
+      400:
+        description: Error with payment refund (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
     """
     try:
         data = request.get_json()
@@ -680,60 +1034,56 @@ def refund_payment():
 @app.route("/api/update_billing_anchor", methods=["POST"])
 def update_billing_anchor():
     """
-    Update the billing anchor date for a subscription.
-
-    Args:
-        subscription_id (str): The ID of the subscription to update.
-        billing_anchor_date (str): The date to anchor the billing on.
-
-    Returns:
-        subscription_id (str): The ID of the subscription.
-        current_period_start (int): The start of the current period.
-        current_period_end (int): The end of the current period.
-    """
-    """
-    Update the billing anchor date for a subscription.
+    Update the billing anchor date of a subscription in Stripe.
     ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
     parameters:
-      - name: body
-        in: body
+      - in: body
+        name: body
+        description: Subscription details
         required: true
         schema:
-          id: UpdateBillingAnchor
+          type: object
           required:
             - subscription_id
-            - billing_anchor_date
           properties:
             subscription_id:
               type: string
-              description: The ID of the subscription to update.
-            billing_anchor_date:
-              type: integer
-              description: The date to anchor the billing on.
+              description: Subscription ID to update
     responses:
-        200:
-            description: Billing anchor updated successfully.
-            schema:
-            id: BillingAnchorResponse
-            properties:
-                subscription_id:
-                type: string
-                description: The ID of the subscription.
-                current_period_start:
-                type: integer
-                description: The start of the current period.
-                current_period_end:
-                type: integer
-                description: The end of the current period.
+      200:
+        description: Subscription updated successfully
+        schema:
+          type: object
+          properties:
+            subscription_id:
+              type: string
+              description: ID of the updated subscription
+      400:
+        description: Error with subscription update (e.g., missing parameters, Stripe error)
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
     """
     try:
         data = request.get_json()
         subscription_id = data["subscription_id"]
-        billing_anchor_date = data["billing_anchor_date"]
 
-        missing, params = missing_params(
-            ["subscription_id", "billing_anchor_date"], data
-        )
+        missing, params = missing_params(["subscription_id"], data)
         if missing:
             return (
                 jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
@@ -742,7 +1092,7 @@ def update_billing_anchor():
 
         updated_subscription = stripe.Subscription.modify(
             subscription_id,
-            billing_cycle_anchor=billing_anchor_date,
+            billing_cycle_anchor="now",
             proration_behavior="none",
         )
 
@@ -763,9 +1113,53 @@ def update_billing_anchor():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/webhook", methods=["POST"])
+def stripe_webhook():
+    """
+    Handle the webhook from Stripe.
+    ---
+    responses:
+      200:
+        description: Webhook processed successfully
+      400:
+        description: Error with webhook processing (e.g., invalid payload, invalid signature)
+      500:
+        description: Internal server error
+    """
+    payload = request.data
+    sig_header = request.headers.get("Stripe-Signature")
+
+    endpoint_secret = os.getenv("FLASK_APP_STRIPE_WEBHOOK_KEY")
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+    except ValueError as e:
+        print(f"Invalid Payload: {e}")
+        return "Invalid payload", 400
+    except stripe.error.SignatureVerificationError as e:
+        print(f"Invalid signature: {e}")
+        return "Invalid signature", 400
+
+    if event["type"] == "payment_intent.succeeded":
+        payment_intent = event["data"]["object"]
+        print("PaymentIntent was successful!")
+    elif event["type"] == "payment_intent.payment_failed":
+        payment_intent = event["data"]["object"]
+        print(f"PaymentIntent failed. {payment_intent}")
+
+    return jsonify({"status": "success"}), 200
+
+
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve(path):
+    """
+    Serve the React app.
+    ---
+    responses:
+      200:
+        description: React app served successfully
+    """
     if path and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
     else:
