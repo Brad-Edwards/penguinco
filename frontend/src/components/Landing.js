@@ -10,7 +10,6 @@ function Landing() {
 
   return (
     <div>
-      <h2>Welcome to PenguinCo</h2>
       <button onClick={() => handlePurchase(1)}>Buy Product 1</button>
       <button onClick={() => handlePurchase(2)}>Buy Product 2</button>
     </div>

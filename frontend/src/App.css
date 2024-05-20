@@ -33,6 +33,30 @@
   }
 }
 
+.app-header {
+  align-items: center;
+  background-color: #6772e5;
+  color: white;
+  display: flex;
+  flex-direction: row;
+  padding: 1rem;
+  text-align: center;
+}
+
+.app-header a {
+  color: white;
+  margin-left: 1.5rem;
+  padding: 0.5rem;
+  text-decoration: none;
+}
+
+.app-header a:hover {
+  color: #ff6347;
+  background-color: white;
+  border-radius: 0.25rem;
+  font-weight: bold;
+}
+
 .product-details img {
   width: 150px;
   margin: 20px;

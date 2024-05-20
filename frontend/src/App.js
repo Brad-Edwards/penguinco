@@ -4,14 +4,13 @@ import Landing from './components/Landing';
 import ProductDetails from './components/ProductDetails';
 import SuccessPage from './components/SuccessPage';
 import './App.css';
+import Header from './components/Header';
 
 function App() {
   return (
     <Router>
       <div className="App">
-        <header className="App-header">
-          <h1>PenguinCo</h1>
-        </header>
+        <Header />
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/purchase" element={<ProductDetails />} />
