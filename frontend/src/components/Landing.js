@@ -1,17 +1,29 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import axios from 'axios';
+import ProductTile from './ProductTile';
 
 function Landing() {
-  const navigate = useNavigate();
+  const [products, setProducts] = useState([]);
 
-  const handlePurchase = (productId) => {
-    navigate('/purchase', { state: { productId } });
-  };
+  useEffect(() => {
+    axios.get(`${process.env.REACT_APP_API_URL}/api/products`)
+      .then(response => {
+        const productsArray = Object.values(response.data).map(item => ({
+          ...item.product,
+          prices: item.prices
+        }));
+        setProducts(productsArray);
+      })
+      .catch(error => console.error('Error fetching products:', error));
+  }, []);
 
   return (
-    <div>
-      <button onClick={() => handlePurchase(1)}>Buy Product 1</button>
-      <button onClick={() => handlePurchase(2)}>Buy Product 2</button>
+    <div className="product-grid-container">
+      <div className="product-grid">
+        {products.map(product => (
+          <ProductTile key={product.id} product={product} />
+        ))}
+      </div>
     </div>
   );
 }

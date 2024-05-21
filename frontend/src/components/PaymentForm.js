@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useStripe, useElements, PaymentElement } from '@stripe/react-stripe-js';
 import { useNavigate } from 'react-router-dom';
 
-function PaymentForm() {
+function PaymentForm({ price }) {
   const stripe = useStripe();
   const elements = useElements();
   const navigate = useNavigate();
@@ -19,7 +19,7 @@ function PaymentForm() {
       elements,
       redirect: 'if_required',
       confirmParams: {
-        return_url: `${window.location.origin}/payment-complete`,
+        return_url: `${window.location.origin}/success`,
       },
     });
 
@@ -46,7 +46,7 @@ function PaymentForm() {
   return (
     <form className='payment-form-container' onSubmit={handleSubmit}>
       <PaymentElement />
-      <button type="submit" disabled={!stripe || loading}>Pay $19.99</button>
+      <button type="submit" disabled={!stripe || loading}>Pay ${price.toFixed(2)}</button>
       {loading && <p>Processing... Please wait.</p>}
     </form>
   );
