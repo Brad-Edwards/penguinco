@@ -630,6 +630,9 @@ def create_payment_intent():
                 type: string
               description: Types of payment methods
               default: ["card"]
+            customer:
+              type: string
+              description: Customer ID to charge
     responses:
       200:
         description: Payment intent created successfully
@@ -658,12 +661,12 @@ def create_payment_intent():
     """
     try:
         data = request.get_json()
-        print(data)
         amount = data["amount"]
+        customer = data["customer_id"]
         currency = data.get("currency", "usd")
         payment_method_types = data.get("payment_method_types", ["card"])
 
-        missing, params = missing_params(["amount"], data)
+        missing, params = missing_params(["amount, customer"], data)
         if missing:
             return (
                 jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
@@ -671,7 +674,10 @@ def create_payment_intent():
             )
 
         payment_intent = stripe.PaymentIntent.create(
-            amount=amount, currency=currency, payment_method_types=payment_method_types
+            amount=amount,
+            currency=currency,
+            payment_method_types=payment_method_types,
+            customer=customer,
         )
         print(payment_intent.id, payment_intent.client_secret)
         return (
@@ -956,6 +962,69 @@ def create_subscription():
             200,
         )
 
+    except stripe.error.StripeError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/get_customer", methods=["POST"])
+def get_customer():
+    """
+    Check if a customer exists in Stripe, or create a new one.
+    ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        description: Customer details
+        required: true
+        schema:
+          type: object
+          required:
+            - email
+          properties:
+            email:
+              type: string
+              description: Customer email
+    responses:
+      200:
+        description: Customer retrieved or created successfully
+        schema:
+          type: object
+          properties:
+            customer_id:
+              type: string
+              description: ID of the customer
+      400:
+        description: Error with customer retrieval or creation
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+    """
+    try:
+        data = request.get_json()
+        email = data.get("email")
+
+        customers = stripe.Customer.list(email=email).data
+        if customers:
+            return jsonify({"customer_id": customers[0].id}), 200
+
+        return create_customer()
     except stripe.error.StripeError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
