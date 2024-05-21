@@ -1,51 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Elements } from '@stripe/react-stripe-js';
-import { loadStripe } from '@stripe/stripe-js';
-import axios from 'axios';
-import ProductDetails from './components/ProductDetails';
+import ErrorPage from './components/ErrorPage';
+import Header from './components/Header';
+import Landing from './components/Landing';
 import PaymentForm from './components/PaymentForm';
+import ProductDetails from './components/ProductDetails';
 import SuccessPage from './components/SuccessPage';
 import './App.css';
 
-const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY);
-
 function App() {
-  const [clientSecret, setClientSecret] = useState('');
-
-  useEffect(() => {
-    axios.post(`${process.env.REACT_APP_API_URL}/api/create_payment_intent`, {
-      amount: 1999,
-      currency: 'usd',
-      payment_method_types: ['card', 'cashapp', 'us_bank_account'],
-    })
-    .then(response => {
-      setClientSecret(response.data.client_secret);
-    })
-    .catch(error => console.error('Error:', error));
-  }, []);
-
-  const options = {
-    clientSecret: clientSecret,
-  };
-
   return (
     <Router>
       <div className="App">
-        <header className="App-header">
-          <h1>PenguinCo</h1>
-        </header>
+        <Header />
         <Routes>
-          <Route path="/" element={
-            <>
-              <ProductDetails />
-              {clientSecret && (
-                <Elements stripe={stripePromise} options={options}>
-                  <PaymentForm />
-                </Elements>
-              )}
-            </>
-          } />
+          <Route path="/" element={<Landing />} />
+          <Route path="/error" element={<ErrorPage />} />
+          <Route path="/payment" element={<PaymentForm />} />
+          <Route path="/purchase" element={<ProductDetails />} />
           <Route path="/success" element={<SuccessPage />} />
         </Routes>
       </div>

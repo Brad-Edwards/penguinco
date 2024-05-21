@@ -630,6 +630,9 @@ def create_payment_intent():
                 type: string
               description: Types of payment methods
               default: ["card"]
+            customer:
+              type: string
+              description: Customer ID to charge
     responses:
       200:
         description: Payment intent created successfully
@@ -658,12 +661,12 @@ def create_payment_intent():
     """
     try:
         data = request.get_json()
-        print(data)
         amount = data["amount"]
+        customer = data["customer_id"]
         currency = data.get("currency", "usd")
         payment_method_types = data.get("payment_method_types", ["card"])
 
-        missing, params = missing_params(["amount"], data)
+        missing, params = missing_params(["amount, customer"], data)
         if missing:
             return (
                 jsonify({"error": MISSING_PARAMETERS, "missing_params": params}),
@@ -671,7 +674,10 @@ def create_payment_intent():
             )
 
         payment_intent = stripe.PaymentIntent.create(
-            amount=amount, currency=currency, payment_method_types=payment_method_types
+            amount=amount,
+            currency=currency,
+            payment_method_types=payment_method_types,
+            customer=customer,
         )
         print(payment_intent.id, payment_intent.client_secret)
         return (
@@ -962,6 +968,69 @@ def create_subscription():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/get_customer", methods=["POST"])
+def get_customer():
+    """
+    Check if a customer exists in Stripe, or create a new one.
+    ---
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        description: Customer details
+        required: true
+        schema:
+          type: object
+          required:
+            - email
+          properties:
+            email:
+              type: string
+              description: Customer email
+    responses:
+      200:
+        description: Customer retrieved or created successfully
+        schema:
+          type: object
+          properties:
+            customer_id:
+              type: string
+              description: ID of the customer
+      400:
+        description: Error with customer retrieval or creation
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+    """
+    try:
+        data = request.get_json()
+        email = data.get("email")
+
+        customers = stripe.Customer.list(email=email).data
+        if customers:
+            return jsonify({"customer_id": customers[0].id}), 200
+
+        return create_customer()
+    except stripe.error.StripeError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/refund_payment", methods=["POST"])
 def refund_payment():
     """
@@ -1106,9 +1175,106 @@ def update_billing_anchor():
             ),
             200,
         )
-
     except stripe.error.StripeError as e:
         return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/product_details", methods=["GET"])
+def product_details():
+    """
+    Get the details of a product in Stripe.
+    ---
+    parameters:
+      - in: query
+        name: productId
+        description: The ID of the product to retrieve details for
+        required: true
+        type: string
+    responses:
+      200:
+        description: Product details retrieved successfully
+        schema:
+          type: object
+          properties:
+            product:
+              type: object
+              description: Product details
+            prices:
+              type: array
+              items:
+                type: object
+                description: Price details
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+    """
+    try:
+        product_id = request.args.get("productId")
+        if not product_id:
+            return jsonify({"error": "Missing productId parameter"}), 400
+
+        product = stripe.Product.retrieve(product_id)
+        prices = stripe.Price.list(product=product_id, active=True)
+
+        product_details = {
+            "product": product,
+            "prices": prices.data,
+        }
+        return jsonify(product_details), 200
+    except stripe.error.StripeError as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/products", methods=["GET"])
+def products_with_prices():
+    """
+    Get all products and their associated active prices in the account catalog.
+    ---
+    responses:
+      200:
+        description: Products and their active prices retrieved successfully
+        schema:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              product:
+                type: object
+                description: Product details
+              prices:
+                type: array
+                items:
+                  type: object
+                  description: Price details
+      500:
+        description: Internal server error
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Description of the error
+    """
+    try:
+        products = stripe.Product.list(active=True)
+        product_price_dict = {}
+
+        for product in products:
+            prices = stripe.Price.list(product=product.id, active=True)
+            product_price_dict[product.id] = {
+                "product": product,
+                "prices": prices,
+            }
+        return jsonify(product_price_dict), 200
+    except stripe.error.StripeError as e:
+        return jsonify({"error": str(e)}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
